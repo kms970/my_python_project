@@ -18,7 +18,7 @@ class ProcessMonitorGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("프로세스 모니터")
-        self.root.geometry("1000x400")
+        self.root.geometry("800x400")
 
         # 이미지 검사 관련 변수 초기화
         if getattr(sys, 'frozen', False):
@@ -36,109 +36,157 @@ class ProcessMonitorGUI:
         self.image_scanner = ImageScanner()
         self.selected_processes = set()
 
-        # 트리뷰 생성 (체크박스 열 추가)
-        self.tree = ttk.Treeview(root, columns=('체크', 'PID', '이름', '창 제목', 'CPU', '메모리'), show='headings')
+        # 메인 프레임 생성
+        main_frame = ttk.Frame(root)
+        main_frame.pack(fill='both', expand=True, padx=10, pady=10)
+
+        # 왼쪽 프레임 (프로세스 목록) - 전체 너비의 약 70%
+        left_frame = ttk.Frame(main_frame, width=550)
+        left_frame.pack(side='left', fill='both', expand=True)
+        left_frame.pack_propagate(False)  # 프레임 크기 고정
+
+        # 오른쪽 프레임 (선택된 프로세스) - 전체 너비의 약 30%
+        right_frame = ttk.Frame(main_frame, width=200)
+        right_frame.pack(side='left', fill='both', padx=(10, 10))
+        right_frame.pack_propagate(False)  # 프레임 크기 고정
+
+        # 선택된 프로세스 표시 레이블
+        ttk.Label(right_frame, text="선택된 프로세스", font=('Arial', 10, 'bold')).pack(pady=5)
+        
+        # 리스트박스와 스크롤바를 담을 프레임
+        listbox_frame = ttk.Frame(right_frame)
+        listbox_frame.pack(fill='both', expand=True, padx=5, pady=(0, 10))
+        
+        # 선택된 프로세스 리스트박스
+        self.selected_listbox = tk.Listbox(
+            listbox_frame, 
+            width=35, 
+            height=15,
+            borderwidth=1,
+            relief="solid"
+        )
+        self.selected_listbox.pack(side='left', fill='both', expand=True)
+
+        # 스크롤바 (리스트박스 안쪽에 배치)
+        selected_scrollbar = ttk.Scrollbar(self.selected_listbox, orient='vertical', 
+                                         command=self.selected_listbox.yview)
+        selected_scrollbar.pack(side='right', fill='y')
+        self.selected_listbox.configure(yscrollcommand=selected_scrollbar.set)
+
+        # 트리뷰 생성 (왼쪽 프레임에 배치)
+        self.tree = ttk.Treeview(left_frame, columns=('체크', 'PID', '이름', '창 제목'), 
+                                show='headings', height=15)
         
         # 컬럼 설정
         self.tree.heading('체크', text='선택')
         self.tree.heading('PID', text='PID')
         self.tree.heading('이름', text='프로세스 이름')
         self.tree.heading('창 제목', text='창 제목')
-        self.tree.heading('CPU', text='CPU 사용률')
-        self.tree.heading('메모리', text='메모리 사용률')
         
         # 컬럼 너비 설정
-        self.tree.column('체크', width=50)
-        self.tree.column('PID', width=70)
+        self.tree.column('체크', width=40, anchor='center')
+        self.tree.column('PID', width=60, anchor='center')
         self.tree.column('이름', width=150)
-        self.tree.column('창 제목', width=150)
-        self.tree.column('CPU', width=100)
-        self.tree.column('메모리', width=100)
+        self.tree.column('창 제목', width=300)
         
         # 체크박스 이벤트 바인딩
         self.tree.bind('<ButtonRelease-1>', self.handle_click)
         
         # 스크롤바 추가
-        scrollbar = ttk.Scrollbar(root, orient='vertical', command=self.tree.yview)
+        scrollbar = ttk.Scrollbar(left_frame, orient='vertical', command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
         
-        # 버튼 프레임 생성
-        button_frame = ttk.Frame(root)
-        
-        # 선택된 프로세스 보기 버튼만 추가
-        show_selected_button = ttk.Button(button_frame, text="선택된 프로세스 보기", 
-                                        command=self.show_selected_processes)
-        show_selected_button.pack(side='left', padx=5)
-        
-        # 위젯 배치
-        self.tree.pack(side='left', fill='both', expand=True)
-        scrollbar.pack(side='right', fill='y')
+        # 버튼 프레임을 왼쪽 프레임 하단에 배치
+        button_frame = ttk.Frame(left_frame)
         button_frame.pack(side='bottom', pady=10)
+
+        # 상태 표시 레이블 (스타일 적용)
+        self.status_label = tk.Label(
+            button_frame, 
+            text="모니터링 중지됨",
+            font=('Arial', 9, 'bold'),
+            fg='red',  # 텍스트 색상
+            bg='#f0f0f0',  # 배경 색상
+            padx=10,
+            pady=5,
+            relief='groove',  # 테두리 스타일
+            borderwidth=1
+        )
+        self.status_label.pack(side='left', padx=10)
         
+        # 모니터링 버튼 (스타일 적용)
+        self.monitor_button = tk.Button(
+            button_frame, 
+            text="모니터링 시작",
+            font=('Arial', 9, 'bold'),
+            fg='white',
+            bg='#4CAF50',  # 초록색 배경
+            activebackground='#45a049',  # 클릭 시 색상
+            padx=15,
+            pady=5,
+            relief='raised',
+            command=self.toggle_monitoring
+        )
+        self.monitor_button.pack(side='left', padx=10)
+
+        # 트리뷰 패키지 추가
+        self.tree.pack(side='left', fill='x')
+        scrollbar.pack(side='right', fill='y')
+
         # 초기 프로세스 목록 로드
         self.update_process_list()
         
         # 3초마다 자동 새로고침
         self.root.after(3000, self.auto_refresh)
 
-        # 버튼 프레임에 모니터링 컨롤 추가
-        self.status_label = ttk.Label(button_frame, text="모니터링 중지됨")
-        self.status_label.pack(side='left', padx=5)
-        
-        self.monitor_button = ttk.Button(button_frame, text="모니터링 시작", 
-                                       command=self.toggle_monitoring)
-        self.monitor_button.pack(side='left', padx=5)
-
     def update_process_list(self):
-        # 기존 항목 삭제
         for item in self.tree.get_children():
             self.tree.delete(item)
             
-        # 새로운 프로세스 목록 가져오기
         processes = ProcessManager.get_process_list()
         
-        # 트리뷰에 프로세스 정보 추가
-        for proc in processes:
+        # 최대 8개까지만 표시
+        for proc in processes[:8]:
             pid = proc['pid']
-            # 체크박스 상태 설정
             check = "✓" if pid in self.selected_processes else " "
             self.tree.insert('', 'end', values=(
                 check,
                 pid,
                 proc['name'],
-                proc['window_title'],
-                proc['cpu'],
-                proc['memory'],
+                proc['window_title']
             ))
+        
+        # 선택된 프로세스 목록 업데이트
+        self.update_selected_listbox()
 
     def handle_click(self, event):
-        # 클릭한 위치의 아이템과 컬럼 확인
         region = self.tree.identify("region", event.x, event.y)
         if region == "cell":
             column = self.tree.identify_column(event.x)
             item = self.tree.identify_row(event.y)
             
-            # 체크박스 컬럼을 클릭했을 때만 처리
             if column == '#1' and item:
                 values = self.tree.item(item)['values']
                 if values:
-                    pid = values[1]  # PID는 두 번째 컬럼
+                    pid = values[1]
+                    name = values[2]
+                    window_title = values[3]
                     
-                    # 선택 상태 토글
                     if pid in self.selected_processes:
                         self.selected_processes.remove(pid)
                     else:
                         self.selected_processes.add(pid)
                     
-                    # 화면 갱신
                     self.update_process_list()
+                    self.update_selected_listbox()  # 선택된 프로세스 목록 업데이트
 
-    def show_selected_processes(self):
-        selected = "\n".join([f"PID: {pid}" for pid in self.selected_processes])
-        if selected:
-            tk.messagebox.showinfo("선택된 프로세스", f"선택된 프로세스:\n{selected}")
-        else:
-            tk.messagebox.showinfo("선택된 프로세스", "선택된 프로세스가 없습니다.")
+    def update_selected_listbox(self):
+        self.selected_listbox.delete(0, tk.END)
+        for pid in self.selected_processes:
+            process_info = ProcessManager.get_process_info(pid)
+            if process_info:
+                self.selected_listbox.insert(tk.END, 
+                    f"PID: {pid} - {process_info['name']}")
 
     def auto_refresh(self):
         self.update_process_list()
@@ -148,14 +196,30 @@ class ProcessMonitorGUI:
         if not self.is_monitoring:
             if self.selected_processes:
                 self.start_monitoring()
-                self.status_label.config(text="모니터링 중...")
-                self.monitor_button.config(text="모니터링 중지")
+                self.status_label.config(
+                    text="모니터링 중...",
+                    fg='white',
+                    bg='#2196F3'  # 파란색 배경
+                )
+                self.monitor_button.config(
+                    text="모니터링 중지",
+                    bg='#f44336',  # 빨간색 배경
+                    activebackground='#da190b'
+                )
             else:
                 messagebox.showwarning("경고", "프로세스를 선택해주세요.")
         else:
             self.stop_monitoring()
-            self.status_label.config(text="모니터링 중지됨")
-            self.monitor_button.config(text="모니터링 시작")
+            self.status_label.config(
+                text="모니터링 중지됨",
+                fg='red',
+                bg='#f0f0f0'
+            )
+            self.monitor_button.config(
+                text="모니터링 시작",
+                bg='#4CAF50',
+                activebackground='#45a049'
+            )
 
     def start_monitoring(self):
         if not self.is_monitoring:
@@ -171,11 +235,27 @@ class ProcessMonitorGUI:
     def monitor_images(self):
         while self.is_monitoring:
             try:
+                # 존재하지 않는 프로세스 필터링
+                active_processes = set()
+                for pid in self.selected_processes:
+                    process_info = ProcessManager.get_process_info(pid)
+                    if process_info:  # 프로세스가 존재하는 경우에만 추가
+                        active_processes.add(pid)
+                    else:
+                        print(f"PID {pid}의 프로세스가 이미 종료되었습니다.")
+                
+                # 활성 프로세스 목록 업데이트
+                self.selected_processes = active_processes
+                
+                # GUI 업데이트
+                self.root.after(0, self.update_selected_listbox)
+                
                 if not self.selected_processes:
-                    print("선택된 프로세스가 없습니다.")
-                    time.sleep(1)
-                    continue
-
+                    print("모니터링할 프로세스가 없습니다.")
+                    self.is_monitoring = False
+                    self.root.after(0, self.clear_and_stop_monitoring)
+                    break
+                
                 if os.path.exists(self.images_folder):
                     image_files = [f for f in os.listdir(self.images_folder) 
                                  if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
@@ -191,18 +271,27 @@ class ProcessMonitorGUI:
                             
                         image_path = os.path.join(self.images_folder, filename)
                         try:
-                            for pid in self.selected_processes:
+                            for pid in list(self.selected_processes):  # list로 변환하여 반복 중 수정 가능하게 함
                                 process_info = ProcessManager.get_process_info(pid)
                                 if process_info and 'window_title' in process_info:
                                     window_title = process_info['window_title']
                                     if window_title != "Unknown":
                                         print(f"검사할 창: {window_title}, PID: {pid}")
                                         
-                                        results = self.image_scanner.find_center(image_path, window_title=window_title, confidence=0.8)
-                                        if results:
+                                        results = self.image_scanner.find_center(
+                                            image_path, 
+                                            window_title=window_title, 
+                                            confidence=0.8
+                                        )
+                                        
+                                        if results and len(results) > 0:
+                                            window_title, match_point = results[0]
+                                            print(f"이미지 매칭 발견: {window_title}")
                                             print(f"[{time.strftime('%H:%M:%S')}] {window_title}의 창에서 이미지 {filename} 발견!")
-                                            ProcessManager.kill_process_by_name(process_info['name'])
-                                            print(f"{window_title} 프로세스를 종료했습니다.")
+                                            ProcessManager.kill_process(pid)
+                                            print(f"PID {pid}의 {window_title} 프로세스를 종료했습니다.")
+                                            self.selected_processes.remove(pid)  # 종료된 프로세스 제거
+                                            self.root.after(0, self.update_selected_listbox)  # GUI 업데이트
                         except Exception as e:
                             print(f"이미지 {filename} 검사 중 오류 발생: {str(e)}")
                 else:
@@ -211,6 +300,39 @@ class ProcessMonitorGUI:
                 print(f"모니터링 중 오류 발생: {str(e)}")
             
             time.sleep(1)
+
+    def stop_monitoring_gui(self):
+        """GUI 스레드에서 모니터링을 중지하는 메서드"""
+        self.stop_monitoring()
+        self.status_label.config(
+            text="모니터링 중지됨",
+            fg='red',
+            bg='#f0f0f0'
+        )
+        self.monitor_button.config(
+            text="모니터링 시작",
+            bg='#4CAF50',
+            activebackground='#45a049'
+        )
+
+    def clear_and_stop_monitoring(self):
+        """프로세스 목록을 초기화하고 모니터링을 중지하는 메서드"""
+        self.is_monitoring = False  # 모니터링 상태를 확실히 False로 설정
+        self.selected_processes.clear()  # 프로세스 목록 초기화
+        self.update_selected_listbox()   # 리스트박스 업데이트
+        self.update_process_list()       # 프로세스 목록 업데이트
+        
+        # GUI 상태 업데이트
+        self.status_label.config(
+            text="모니터링 중지됨",
+            fg='red',
+            bg='#f0f0f0'
+        )
+        self.monitor_button.config(
+            text="모니터링 시작",
+            bg='#4CAF50',
+            activebackground='#45a049'
+        )
 
 def main():
     root = tk.Tk()

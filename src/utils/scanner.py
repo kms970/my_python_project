@@ -6,6 +6,7 @@ import win32ui
 import win32con
 import win32process
 from ctypes import windll
+import os
 
 class ImageScanner:
     def __init__(self):
@@ -71,10 +72,11 @@ class ImageScanner:
         return sorted(windows, key=lambda x: int(x[1].split('-')[1]))  # LDPlayer-n 숫자 순서로 정렬
 
     def find_center(self, image_path, window_title=None, confidence=0.8):
-        # 기준 해상도 설정
-        BASE_WIDTH = 960
-        BASE_HEIGHT = 540
+        # 파일명 추출
+        filename = os.path.basename(image_path)
+        print(f"\n현재 검사 중인 이미지: {filename}")
 
+        # LDPlayer 창 목록 가져오기
         ldplayer_windows = self.find_ldplayer_windows()
         if not ldplayer_windows:
             print("실행 중인 LDPlayer 창을 찾을 수 없습니다.")
@@ -86,67 +88,55 @@ class ImageScanner:
                 print(f"지정된 창을 찾을 수 없습니다: {window_title}")
                 return None
 
-        template = cv2.imread(image_path)
+        # 템플릿 이미지 로드 및 전처리
+        template = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
         if template is None:
-            print(f"템플릿 이미지를 불러올 수 없습니다: {image_path}")
+            print(f"템플릿 이미지를 불러올 수 없습니다: {filename}")
             return None
         
-        # BGR로 변환하여 알파 채널 제거
-        template = cv2.cvtColor(template, cv2.COLOR_BGR2RGB)
-        template_gray = cv2.cvtColor(template, cv2.COLOR_RGB2GRAY)
-        print(f"템플릿 이미지 크기: {template_gray.shape}")
-
+        print(f"템플릿 이미지 크기 ({filename}): {template.shape}")
+        
         results = []
         for hwnd, title in ldplayer_windows:
             screenshot = self.capture_window(hwnd)
             if screenshot is None:
-                print(f"{title}: 스크린샷을 캡처할 수 없습니다.")
+                print(f"{title}: 스크린샷을 캡처할 수 없습니다. (검사 이미지: {filename})")
                 continue
             
-            # 스크린샷의 알파 채널 제거
-            screenshot = cv2.cvtColor(screenshot, cv2.COLOR_BGRA2RGB)
-            screenshot_gray = cv2.cvtColor(screenshot, cv2.COLOR_RGB2GRAY)
-            print(f"{title} 스크린샷 크기: {screenshot_gray.shape}")
-
-            # 현재 창과 기준 해상도의 비율 계산
-            scale = min(
-                screenshot_gray.shape[1] / BASE_WIDTH,
-                screenshot_gray.shape[0] / BASE_HEIGHT
-            )
+            # 이미지 채널 수 확인 및 처리
+            if len(template.shape) == 3 and template.shape[2] == 4:  # 알파 채널이 있는 경우
+                template = cv2.cvtColor(template, cv2.COLOR_BGRA2BGR)
             
-            # 템플릿 이미지 크기 조정
-            new_width = int(template_gray.shape[1] * scale)
-            new_height = int(template_gray.shape[0] * scale)
-            scaled_template = cv2.resize(template_gray, (new_width, new_height), 
-                                       interpolation=cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR)
-
-            # 이미지 전처리
-            scaled_template = cv2.normalize(scaled_template, None, 0, 255, cv2.NORM_MINMAX)
-            screenshot_gray = cv2.normalize(screenshot_gray, None, 0, 255, cv2.NORM_MINMAX)
-
-            print(f"{title} - 스케일: {scale:.3f}, 이미지 이름: {image_path}, 조정된 템플릿 크기: {scaled_template.shape}")
-
-            # 템플릿 매칭 (여러 방법 시도)
-            methods = [cv2.TM_CCOEFF_NORMED, cv2.TM_CCORR_NORMED]
-            max_val_overall = 0
-            best_loc = None
+            if len(screenshot.shape) == 3 and screenshot.shape[2] == 4:  # 알파 채널이 있는 경우
+                screenshot = cv2.cvtColor(screenshot, cv2.COLOR_BGRA2BGR)
             
-            for method in methods:
-                result = cv2.matchTemplate(screenshot_gray, scaled_template, method)
-                min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
-                
-                if max_val > max_val_overall:
-                    max_val_overall = max_val
-                    best_loc = max_loc
+            # 그레이스케일로 변환
+            template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+            screenshot_gray = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
+            
+            print(f"{title} 스크린샷 크기 (검사 이미지: {filename}): {screenshot_gray.shape}")
+            
+            # 디버깅을 위한 이미지 저장
+            cv2.imwrite(f'debug_screenshot_{title}.png', screenshot_gray)
+            cv2.imwrite(f'debug_template_{title}.png', template_gray)
 
-            print(f"{title} - 매칭 신뢰도: {max_val_overall:.3f}")
+            # 템플릿 매칭
+            result = cv2.matchTemplate(screenshot_gray, template_gray, cv2.TM_CCOEFF_NORMED)
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+            
+            print(f"{title} - 매칭 신뢰도 ({filename}): {max_val:.3f}")
 
-            if max_val_overall >= confidence:
-                center_x = best_loc[0] + new_width // 2
-                center_y = best_loc[1] + new_height // 2
+            if max_val >= confidence:
+                center_x = max_loc[0] + template_gray.shape[1] // 2
+                center_y = max_loc[1] + template_gray.shape[0] // 2
                 results.append((title, (center_x, center_y)))
-                print(f"{title}: 매칭 성공 - 중심점 ({center_x}, {center_y})")
-            else:
-                print(f"{title}: 매칭 실패")
+                print(f"{title}: 매칭 성공 - {filename} 발견! 중심점 ({center_x}, {center_y})")
+                
+                # 디버깅을 위한 매칭 결과 시각화
+                debug_img = screenshot_gray.copy()
+                cv2.rectangle(debug_img, max_loc, 
+                             (max_loc[0] + template_gray.shape[1], max_loc[1] + template_gray.shape[0]), 
+                             255, 2)
+                cv2.imwrite(f'debug_result_{title}.png', debug_img)
 
         return results

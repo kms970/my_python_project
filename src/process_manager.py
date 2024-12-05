@@ -43,9 +43,9 @@ class ProcessManager:
         return processes
 
     @staticmethod
-    def kill_process_by_name(process_name):
+    def kill_process(pid):
         try:
-            os.system(f'taskkill /F /IM "{process_name}.exe"')
+            os.system(f'taskkill /F /PID {pid}')
             return True
         except Exception as e:
             print(f"프로세스 종료 중 오류 발생: {str(e)}")
