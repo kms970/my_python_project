@@ -239,15 +239,12 @@ class ProcessMonitorGUI:
                 active_processes = set()
                 for pid in self.selected_processes:
                     process_info = ProcessManager.get_process_info(pid)
-                    if process_info:  # 프로세스가 존재하는 경우에만 추가
+                    if process_info:
                         active_processes.add(pid)
                     else:
                         print(f"PID {pid}의 프로세스가 이미 종료되었습니다.")
                 
-                # 활성 프로세스 목록 업데이트
                 self.selected_processes = active_processes
-                
-                # GUI 업데이트
                 self.root.after(0, self.update_selected_listbox)
                 
                 if not self.selected_processes:
@@ -256,50 +253,50 @@ class ProcessMonitorGUI:
                     self.root.after(0, self.clear_and_stop_monitoring)
                     break
                 
+                # images 폴더 검사 (로깅 제거)
                 if os.path.exists(self.images_folder):
                     image_files = [f for f in os.listdir(self.images_folder) 
                                  if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
                     
-                    if not image_files:
-                        print("images 폴더에 이미지 파일이 없습니다.")
-                        time.sleep(1)
-                        continue
-
-                    for filename in image_files:
-                        if not self.is_monitoring:
-                            break
-                            
-                        image_path = os.path.join(self.images_folder, filename)
-                        try:
-                            for pid in list(self.selected_processes):  # list로 변환하여 반복 중 수정 가능하게 함
-                                process_info = ProcessManager.get_process_info(pid)
-                                if process_info and 'window_title' in process_info:
-                                    window_title = process_info['window_title']
-                                    if window_title != "Unknown":
-                                        print(f"검사할 창: {window_title}, PID: {pid}")
-                                        
-                                        results = self.image_scanner.find_center(
-                                            image_path, 
-                                            window_title=window_title, 
+                    # click_images 폴더 검사
+                    click_images_folder = os.path.join(os.path.dirname(self.images_folder), "click_images")
+                    if os.path.exists(click_images_folder):
+                        click_image_files = [f for f in os.listdir(click_images_folder) 
+                                          if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+                        
+                        for pid in list(self.selected_processes):
+                            process_info = ProcessManager.get_process_info(pid)
+                            if process_info and 'window_title' in process_info:
+                                window_title = process_info['window_title']
+                                if window_title != "Unknown":
+                                    # 클릭 이미지 검사 및 클릭
+                                    for filename in click_image_files:
+                                        image_path = os.path.join(click_images_folder, filename)
+                                        self.image_scanner.click_image(
+                                            image_path,
+                                            window_title=window_title,
                                             confidence=0.8
                                         )
-                                        
-                                        if results and len(results) > 0:
-                                            window_title, match_point = results[0]
-                                            print(f"이미지 매칭 발견: {window_title}")
-                                            print(f"[{time.strftime('%H:%M:%S')}] {window_title}의 창에서 이미지 {filename} 발견!")
+                                    
+                                    # 종료 조건 이미지 검사 (로깅 제거)
+                                    for filename in image_files:
+                                        image_path = os.path.join(self.images_folder, filename)
+                                        results = self.image_scanner.find_center(
+                                            image_path,
+                                            window_title=window_title,
+                                            confidence=0.8,
+                                            suppress_logging=True
+                                        )
+                                        if results:
                                             ProcessManager.kill_process(pid)
-                                            print(f"PID {pid}의 {window_title} 프로세스를 종료했습니다.")
-                                            self.selected_processes.remove(pid)  # 종료된 프로세스 제거
-                                            self.root.after(0, self.update_selected_listbox)  # GUI 업데이트
-                        except Exception as e:
-                            print(f"이미지 {filename} 검사 중 오류 발생: {str(e)}")
-                else:
-                    print(f"이미지 폴더를 찾을 수 없습니다: {self.images_folder}")
+                                            self.selected_processes.remove(pid)
+                                            self.root.after(0, self.update_selected_listbox)
+                                            break
+                
+                time.sleep(1)
+                
             except Exception as e:
                 print(f"모니터링 중 오류 발생: {str(e)}")
-            
-            time.sleep(1)
 
     def stop_monitoring_gui(self):
         """GUI 스레드에서 모니터링을 중지하는 메서드"""

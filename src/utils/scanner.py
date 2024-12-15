@@ -71,36 +71,42 @@ class ImageScanner:
         win32gui.EnumWindows(callback, windows)
         return sorted(windows, key=lambda x: int(x[1].split('-')[1]))  # LDPlayer-n 숫자 순서로 정렬
 
-    def find_center(self, image_path, window_title=None, confidence=0.8):
+    def find_center(self, image_path, window_title=None, confidence=0.8, suppress_logging=False):
         # 파일명 추출
         filename = os.path.basename(image_path)
-        print(f"\n현재 검사 중인 이미지: {filename}")
+        if not suppress_logging:
+            print(f"\n현재 검사 중인 이미지: {filename}")
 
         # LDPlayer 창 목록 가져오기
         ldplayer_windows = self.find_ldplayer_windows()
         if not ldplayer_windows:
-            print("실행 중인 LDPlayer 창을 찾을 수 없습니다.")
+            if not suppress_logging:
+                print("실행 중인 LDPlayer 창을 찾을 수 없습니다.")
             return None
 
         if window_title:
             ldplayer_windows = [(hwnd, title) for hwnd, title in ldplayer_windows if title == window_title]
             if not ldplayer_windows:
-                print(f"지정된 창을 찾을 수 없습니다: {window_title}")
+                if not suppress_logging:
+                    print(f"지정된 창을 찾을 수 없습니다: {window_title}")
                 return None
 
         # 템플릿 이미지 로드 및 전처리
         template = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
         if template is None:
-            print(f"템플릿 이미지를 불러올 수 없습니다: {filename}")
+            if not suppress_logging:
+                print(f"템플릿 이미지를 불러올 수 없습니다: {filename}")
             return None
         
-        print(f"템플릿 이미지 크기 ({filename}): {template.shape}")
+        if not suppress_logging:
+            print(f"템플릿 이미지 크기 ({filename}): {template.shape}")
         
         results = []
         for hwnd, title in ldplayer_windows:
             screenshot = self.capture_window(hwnd)
             if screenshot is None:
-                print(f"{title}: 스크린샷을 캡처할 수 없습니다. (검사 이미지: {filename})")
+                if not suppress_logging:
+                    print(f"{title}: 스크린샷을 캡처할 수 없습니다. (검사 이미지: {filename})")
                 continue
             
             # 이미지 채널 수 확인 및 처리
@@ -114,29 +120,82 @@ class ImageScanner:
             template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
             screenshot_gray = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
             
-            print(f"{title} 스크린샷 크기 (검사 이미지: {filename}): {screenshot_gray.shape}")
-            
-            # 디버깅을 위한 이미지 저장
-            cv2.imwrite(f'debug_screenshot_{title}.png', screenshot_gray)
-            cv2.imwrite(f'debug_template_{title}.png', template_gray)
+            if not suppress_logging:
+                print(f"{title} 스크린샷 크기 (검사 이미지: {filename}): {screenshot_gray.shape}")
+                
+                # 디버깅을 위한 이미지 저장
+                cv2.imwrite(f'debug_screenshot_{title}.png', screenshot_gray)
+                cv2.imwrite(f'debug_template_{title}.png', template_gray)
 
             # 템플릿 매칭
             result = cv2.matchTemplate(screenshot_gray, template_gray, cv2.TM_CCOEFF_NORMED)
             min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
             
-            print(f"{title} - 매칭 신뢰도 ({filename}): {max_val:.3f}")
+            if not suppress_logging:
+                print(f"{title} - 매칭 신뢰도 ({filename}): {max_val:.3f}")
 
             if max_val >= confidence:
                 center_x = max_loc[0] + template_gray.shape[1] // 2
                 center_y = max_loc[1] + template_gray.shape[0] // 2
                 results.append((title, (center_x, center_y)))
-                print(f"{title}: 매칭 성공 - {filename} 발견! 중심점 ({center_x}, {center_y})")
-                
-                # 디버깅을 위한 매칭 결과 시각화
-                debug_img = screenshot_gray.copy()
-                cv2.rectangle(debug_img, max_loc, 
-                             (max_loc[0] + template_gray.shape[1], max_loc[1] + template_gray.shape[0]), 
-                             255, 2)
-                cv2.imwrite(f'debug_result_{title}.png', debug_img)
+                if not suppress_logging:
+                    print(f"{title}: 매칭 성공 - {filename} 발견! 중심점 ({center_x}, {center_y})")
+                    
+                    # 디버깅을 위한 매칭 결과 시각화
+                    debug_img = screenshot_gray.copy()
+                    cv2.rectangle(debug_img, max_loc, 
+                                 (max_loc[0] + template_gray.shape[1], max_loc[1] + template_gray.shape[0]), 
+                                 255, 2)
+                    cv2.imwrite(f'debug_result_{title}.png', debug_img)
 
         return results
+
+    def click_image(self, image_path, window_title=None, confidence=0.8, color_threshold=30):
+        results = self.find_center(image_path, window_title, confidence)
+        if not results:
+            return False
+
+        for title, (center_x, center_y) in results:
+            # 원본 이미지의 색상 가져오기
+            template = cv2.imread(image_path)
+            if template is None:
+                continue
+            
+            # BGR -> RGB 변환
+            template = cv2.cvtColor(template, cv2.COLOR_BGR2RGB)
+            template_center = template[template.shape[0]//2, template.shape[1]//2]
+            
+            # 스크린샷에서의 색상 가져오기
+            hwnd = win32gui.FindWindow(None, title)
+            if not hwnd:
+                continue
+            
+            screenshot = self.capture_window(hwnd)
+            if screenshot is None:
+                continue
+            
+            # BGRA -> RGB 변환
+            screenshot = cv2.cvtColor(screenshot, cv2.COLOR_BGRA2RGB)
+            
+            # 창의 위치 가져오기
+            left, top, _, _ = win32gui.GetWindowRect(hwnd)
+            
+            # 실제 클릭할 위치의 색상 확인
+            click_color = screenshot[center_y, center_x]
+            
+            # 색상 차이 계산
+            color_diff = np.sum(np.abs(template_center - click_color[:3]))  # RGB만 비교
+            
+            if color_diff <= color_threshold:
+                # 전체 화면 기준으로 클릭 위치 계산
+                screen_x = left + center_x
+                screen_y = top + center_y
+                
+                # 클릭 실행
+                pyautogui.click(screen_x, screen_y)
+                print(f"이미지 클릭 성공: {title} ({screen_x}, {screen_y})")
+                return True
+            else:
+                print(f"색상이 일치하지 않습니다. 차이값: {color_diff}")
+                
+        return False
