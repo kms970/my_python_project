@@ -2,11 +2,14 @@ import tkinter as tk
 from tkinter import ttk
 import sys
 import os
+import json
 
 # 현재 디렉토리의 부모 디렉토리를 path에 추가
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
+
+CONFIG_FILE = os.path.join(current_dir, 'config.json')
 
 from src.process_manager import ProcessManager
 from src.utils.scanner import ImageScanner
@@ -20,25 +23,27 @@ class ProcessMonitorGUI:
         self.root.title("프로세스 모니터")
         self.root.geometry("800x400")
 
-        # 이미지 검사 관련 변수 초기화
-        if getattr(sys, 'frozen', False):
-            # PyInstaller로 패키징된 경우
-            base_path = sys._MEIPASS
-        else:
-            # 일반 Python 스크립트로 실행된 경우
-            base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        # 변수 초기화
+        self.selected_processes = set()  # 추가된 부분
+        self.is_monitoring = False      # 추가된 부분
+        self.monitor_thread = None      # 추가된 부분
+        self.image_scanner = ImageScanner()  # 추가된 부분
+        self.images_folder = os.path.join(parent_dir, "images")  # 추가된 부분
 
-        self.images_folder = os.path.join(base_path, "images")
-        print(f"이미지 폴더 경로: {self.images_folder}")  # 디버깅용
+        # 설정 로드
+        self.load_config()
         
-        self.is_monitoring = False
-        self.monitor_thread = None
-        self.image_scanner = ImageScanner()
-        self.selected_processes = set()
-
         # 메인 프레임 생성
         main_frame = ttk.Frame(root)
         main_frame.pack(fill='both', expand=True, padx=10, pady=10)
+
+        # 상단 프레임 (ADB 설정)
+        top_frame = ttk.Frame(main_frame)
+        top_frame.pack(fill='x', pady=(0, 10))
+
+        ttk.Label(top_frame, text="ADB 경로:").pack(side='left', padx=(0, 5))
+        ttk.Entry(top_frame, textvariable=self.adb_path, width=50).pack(side='left', padx=(0, 5))
+        ttk.Button(top_frame, text="경로 선택", command=self.select_adb_path).pack(side='left')
 
         # 왼쪽 프레임 (프로세스 목록) - 전체 너비의 약 70%
         left_frame = ttk.Frame(main_frame, width=550)
@@ -138,6 +143,45 @@ class ProcessMonitorGUI:
         
         # 3초마다 자동 새로고침
         self.root.after(3000, self.auto_refresh)
+
+    def load_config(self):
+        default_adb_path = r"C:\Program Files (x86)\LDPlayer\LDPlayer9\adb.exe"
+        self.adb_path = tk.StringVar()
+        
+        try:
+            if os.path.exists(CONFIG_FILE):
+                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    self.adb_path.set(config.get('adb_path', default_adb_path))
+            else:
+                self.adb_path.set(default_adb_path)
+        except Exception as e:
+            print(f"설정 파일 로드 중 오류 발생: {str(e)}")
+            self.adb_path.set(default_adb_path)
+
+    def save_config(self):
+        try:
+            config = {
+                'adb_path': self.adb_path.get()
+            }
+            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f"설정 파일 저장 중 오류 발생: {str(e)}")
+
+    def select_adb_path(self):
+        from tkinter import filedialog
+        filename = filedialog.askopenfilename(
+            title="ADB 실행 파일 선택",
+            filetypes=[("실행 파일", "*.exe"), ("모든 파일", "*.*")]
+        )
+        if filename:
+            self.adb_path.set(filename)
+            self.save_config()  # 경로 선택 시 자동 저장
+
+    def on_closing(self):
+        self.save_config()  # 프로그램 종료 시 설정 저장
+        self.root.destroy()
 
     def update_process_list(self):
         for item in self.tree.get_children():
@@ -275,7 +319,8 @@ class ProcessMonitorGUI:
                                         self.image_scanner.click_image(
                                             image_path,
                                             window_title=window_title,
-                                            confidence=0.8
+                                            confidence=0.8,
+                                            adb_path=self.adb_path.get()
                                         )
                                     
                                     # 종료 조건 이미지 검사 (로깅 제거)
@@ -334,6 +379,7 @@ class ProcessMonitorGUI:
 def main():
     root = tk.Tk()
     app = ProcessMonitorGUI(root)
+    root.protocol("WM_DELETE_WINDOW", app.on_closing)  # 종료 이벤트 처리
     root.mainloop()
 
 if __name__ == "__main__":
