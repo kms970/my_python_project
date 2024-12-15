@@ -189,8 +189,8 @@ class ImageScanner:
         ACTUAL_HEIGHT = 540
         
         # 좌표 오프셋 계산
-        offset_x = (SCREENSHOT_WIDTH - ACTUAL_WIDTH) // 2  # 17
-        offset_y = (SCREENSHOT_HEIGHT - ACTUAL_HEIGHT) // 2  # 19
+        offset_x = (SCREENSHOT_WIDTH - ACTUAL_WIDTH) // 2
+        offset_y = (SCREENSHOT_HEIGHT - ACTUAL_HEIGHT) // 2
 
         for title, (center_x, center_y) in results:
             try:
@@ -229,29 +229,6 @@ class ImageScanner:
                 if screenshot is None:
                     continue
                 
-                # 클릭 위치 표시를 위한 이미지 복사
-                display_image = screenshot.copy()
-                
-                # 빨간 점 그리기 (반경 5픽셀의 원)
-                cv2.circle(display_image, (center_x, center_y), 5, (0, 0, 255), -1)
-                # 위치 텍스트 표시
-                cv2.putText(display_image, f"Click: ({center_x}, {center_y})", 
-                           (center_x + 10, center_y - 10), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-                
-                # 현재 시간을 포함한 파일명 생성
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"click_position_{title}_{timestamp}.png"
-                
-                # debug 폴더가 없으면 생성
-                debug_dir = "debug"
-                if not os.path.exists(debug_dir):
-                    os.makedirs(debug_dir)
-                
-                # 이미지 저장
-                cv2.imwrite(os.path.join(debug_dir, filename), display_image)
-                print(f"클릭 위치 이미지 저장됨: {filename}")
-                
                 screenshot = cv2.cvtColor(screenshot, cv2.COLOR_BGRA2RGB)
                 click_color = screenshot[center_y, center_x]
                 color_diff = np.sum(np.abs(template_center - click_color[:3]))
@@ -265,7 +242,7 @@ class ImageScanner:
                             connect_result = subprocess.run(
                                 [adb_path, "connect", device_address], 
                                 capture_output=True, 
-                                text=True  # 텍스트 모드로 출력 캡처
+                                text=True
                             )
                             if connect_result.returncode != 0:
                                 print(f"ADB 연결 명령 실패: {connect_result.stderr}")
@@ -275,30 +252,14 @@ class ImageScanner:
                             print(f"ADB 연결 중 오류 발생: {str(e)}")
                             continue
                         
-                        # 디바이스 목록 확인
-                        try:
-                            devices_result = subprocess.run(
-                                [adb_path, "devices"], 
-                                capture_output=True, 
-                                text=True
-                            )
-                            if devices_result.returncode != 0:
-                                print(f"디바이스 목록 확인 실패: {devices_result.stderr}")
-                                if devices_result.stdout:
-                                    print(f"출력: {devices_result.stdout}")
-                            print(f"연결된 디바이스 목록:\n{devices_result.stdout}")
-                        except Exception as e:
-                            print(f"디바이스 목록 확인 중 오류 발생: {str(e)}")
-                            continue
+                        devices_result = subprocess.run(
+                            [adb_path, "devices"], 
+                            capture_output=True, 
+                            text=True
+                        )
                         
                         if device_address in devices_result.stdout:
-                            # 보정된 좌표로 클릭
                             cmd = f"{adb_path} -s {device_address} shell input tap {adjusted_x} {adjusted_y}"
-                            print(f"\n실행할 명령어: {cmd}")
-                            
-                            startupinfo = subprocess.STARTUPINFO()
-                            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                            
                             result = subprocess.run(
                                 cmd,
                                 shell=True,
@@ -308,18 +269,14 @@ class ImageScanner:
                             
                             if result.returncode == 0:
                                 print(f"이미지 클릭 성공: {title} ({adjusted_x}, {adjusted_y})")
-                                if result.stdout:
-                                    print(f"출력: {result.stdout}")
                                 success = True
                             else:
                                 print(f"클릭 명령 실패: {result.stderr}")
-                                if result.stdout:
-                                    print(f"출력: {result.stdout}")
                         else:
-                            print(f"ADB 연결 실패: {device_address}가 디바이스 목록에 없습니다.")
+                            print(f"ADB 연결 실패: {device_address}")
                             
                     except Exception as e:
-                        print(f"클릭 처리 중 오류 발생: {str(e)}")
+                        print(f"클릭 처 오류 발생: {str(e)}")
                 else:
                     print(f"색상이 일치하지 않습니다. 차이값: {color_diff}")
                     
