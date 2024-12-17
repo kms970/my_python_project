@@ -7,6 +7,8 @@ import win32con
 import win32process
 from ctypes import windll
 import os
+import time
+from datetime import datetime
 
 class ImageScanner:
     def __init__(self):
@@ -84,6 +86,7 @@ class ImageScanner:
                 print("실행 중인 LDPlayer 창을 찾을 수 없습니다.")
             return None
 
+        # window_title이 지정된 경우 해당 창만 처리
         if window_title:
             ldplayer_windows = [(hwnd, title) for hwnd, title in ldplayer_windows if title == window_title]
             if not ldplayer_windows:
@@ -106,14 +109,22 @@ class ImageScanner:
             screenshot = self.capture_window(hwnd)
             if screenshot is None:
                 if not suppress_logging:
-                    print(f"{title}: 스크린샷을 캡처할 수 없습니다. (검사 이미지: {filename})")
+                    print(f"{title}: 스크린샷을 캡처할 수 없습니다.")
+                continue
+            
+            # 이미지 크기 비교
+            if (template.shape[0] > screenshot.shape[0] or 
+                template.shape[1] > screenshot.shape[1]):
+                if not suppress_logging:
+                    print(f"{title}: 템플릿 이미지가 스크린샷보다 큽니다. 건너뜁니다.")
+                    print(f"템플릿 크기: {template.shape}, 스크린샷 크기: {screenshot.shape}")
                 continue
             
             # 이미지 채널 수 확인 및 처리
-            if len(template.shape) == 3 and template.shape[2] == 4:  # 알파 채널이 있는 경우
+            if len(template.shape) == 3 and template.shape[2] == 4:
                 template = cv2.cvtColor(template, cv2.COLOR_BGRA2BGR)
             
-            if len(screenshot.shape) == 3 and screenshot.shape[2] == 4:  # 알파 채널이 있는 경우
+            if len(screenshot.shape) == 3 and screenshot.shape[2] == 4:
                 screenshot = cv2.cvtColor(screenshot, cv2.COLOR_BGRA2BGR)
             
             # 그레이스케일로 변환
@@ -121,81 +132,139 @@ class ImageScanner:
             screenshot_gray = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
             
             if not suppress_logging:
-                print(f"{title} 스크린샷 크기 (검사 이미지: {filename}): {screenshot_gray.shape}")
-                
-                # 디버깅을 위한 이미지 저장
-                cv2.imwrite(f'debug_screenshot_{title}.png', screenshot_gray)
-                cv2.imwrite(f'debug_template_{title}.png', template_gray)
+                print(f"{title} 스크린샷 크기: {screenshot_gray.shape}")
 
             # 템플릿 매칭
             result = cv2.matchTemplate(screenshot_gray, template_gray, cv2.TM_CCOEFF_NORMED)
             min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
             
             if not suppress_logging:
-                print(f"{title} - 매칭 신뢰도 ({filename}): {max_val:.3f}")
+                print(f"{title} - 매칭 신뢰도: {max_val:.3f}")
 
             if max_val >= confidence:
                 center_x = max_loc[0] + template_gray.shape[1] // 2
                 center_y = max_loc[1] + template_gray.shape[0] // 2
                 results.append((title, (center_x, center_y)))
-                if not suppress_logging:
-                    print(f"{title}: 매칭 성공 - {filename} 발견! 중심점 ({center_x}, {center_y})")
-                    
-                    # 디버깅을 위한 매칭 결과 시각화
-                    debug_img = screenshot_gray.copy()
-                    cv2.rectangle(debug_img, max_loc, 
-                                 (max_loc[0] + template_gray.shape[1], max_loc[1] + template_gray.shape[0]), 
-                                 255, 2)
-                    cv2.imwrite(f'debug_result_{title}.png', debug_img)
 
         return results
 
-    def click_image(self, image_path, window_title=None, confidence=0.8, color_threshold=30):
+    def click_image(self, image_path, window_title=None, confidence=0.8, color_threshold=30, adb_path=None):
+        import subprocess
+        import cv2
+        import numpy as np
+        import time
+        from datetime import datetime
+        
+        if not adb_path:
+            print("ADB 경로가 설정되지 않았습니다.")
+            return False
+        
         results = self.find_center(image_path, window_title, confidence)
         if not results:
             return False
 
+        success = False
+        
+        # 스크린샷과 실제 해상도 차이
+        SCREENSHOT_WIDTH = 994
+        SCREENSHOT_HEIGHT = 578
+        ACTUAL_WIDTH = 960
+        ACTUAL_HEIGHT = 540
+        
+        # 좌표 오프셋 계산
+        offset_x = (SCREENSHOT_WIDTH - ACTUAL_WIDTH) // 2
+        offset_y = (SCREENSHOT_HEIGHT - ACTUAL_HEIGHT) // 2
+
         for title, (center_x, center_y) in results:
-            # 원본 이미지의 색상 가져오기
-            template = cv2.imread(image_path)
-            if template is None:
-                continue
-            
-            # BGR -> RGB 변환
-            template = cv2.cvtColor(template, cv2.COLOR_BGR2RGB)
-            template_center = template[template.shape[0]//2, template.shape[1]//2]
-            
-            # 스크린샷에서의 색상 가져오기
-            hwnd = win32gui.FindWindow(None, title)
-            if not hwnd:
-                continue
-            
-            screenshot = self.capture_window(hwnd)
-            if screenshot is None:
-                continue
-            
-            # BGRA -> RGB 변환
-            screenshot = cv2.cvtColor(screenshot, cv2.COLOR_BGRA2RGB)
-            
-            # 창의 위치 가져오기
-            left, top, _, _ = win32gui.GetWindowRect(hwnd)
-            
-            # 실제 클릭할 위치의 색상 확인
-            click_color = screenshot[center_y, center_x]
-            
-            # 색상 차이 계산
-            color_diff = np.sum(np.abs(template_center - click_color[:3]))  # RGB만 비교
-            
-            if color_diff <= color_threshold:
-                # 전체 화면 기준으로 클릭 위치 계산
-                screen_x = left + center_x
-                screen_y = top + center_y
+            try:
+                if window_title and title != window_title:
+                    continue
                 
-                # 클릭 실행
-                pyautogui.click(screen_x, screen_y)
-                print(f"이미지 클릭 성공: {title} ({screen_x}, {screen_y})")
-                return True
-            else:
-                print(f"색상이 일치하지 않습니다. 차이값: {color_diff}")
+                try:
+                    instance_num = int(title.split('-')[1])
+                    adb_port = 5555 + (instance_num * 2)
+                    device_address = f"127.0.0.1:{adb_port}"
+                    
+                    # 좌표 보정
+                    adjusted_x = center_x - offset_x
+                    adjusted_y = center_y - offset_y
+                    
+                    print(f"처리 중 - 창: {title}, 인스턴스: {instance_num}, 포트: {adb_port}")
+                    print(f"원본 좌표: ({center_x}, {center_y})")
+                    print(f"보정된 좌표: ({adjusted_x}, {adjusted_y})")
+                except Exception as e:
+                    print(f"인덱스 추출 오류 ({title}): {str(e)}")
+                    continue
                 
-        return False
+                # 원본 이미지의 색상 가져오기
+                template = cv2.imread(image_path)
+                if template is None:
+                    continue
+                
+                template = cv2.cvtColor(template, cv2.COLOR_BGR2RGB)
+                template_center = template[template.shape[0]//2, template.shape[1]//2]
+                
+                hwnd = win32gui.FindWindow(None, title)
+                if not hwnd:
+                    continue
+                
+                screenshot = self.capture_window(hwnd)
+                if screenshot is None:
+                    continue
+                
+                screenshot = cv2.cvtColor(screenshot, cv2.COLOR_BGRA2RGB)
+                click_color = screenshot[center_y, center_x]
+                color_diff = np.sum(np.abs(template_center - click_color[:3]))
+                
+                if color_diff <= color_threshold:
+                    try:
+                        print(f"클릭 시도 - 창: {title}, 주소: {device_address}")
+                        
+                        # ADB 연결 시도
+                        try:
+                            connect_result = subprocess.run(
+                                [adb_path, "connect", device_address], 
+                                capture_output=True, 
+                                text=True
+                            )
+                            if connect_result.returncode != 0:
+                                print(f"ADB 연결 명령 실패: {connect_result.stderr}")
+                                if connect_result.stdout:
+                                    print(f"출력: {connect_result.stdout}")
+                        except Exception as e:
+                            print(f"ADB 연결 중 오류 발생: {str(e)}")
+                            continue
+                        
+                        devices_result = subprocess.run(
+                            [adb_path, "devices"], 
+                            capture_output=True, 
+                            text=True
+                        )
+                        
+                        if device_address in devices_result.stdout:
+                            cmd = f"{adb_path} -s {device_address} shell input tap {adjusted_x} {adjusted_y}"
+                            result = subprocess.run(
+                                cmd,
+                                shell=True,
+                                capture_output=True,
+                                text=True,
+                            )
+                            
+                            if result.returncode == 0:
+                                print(f"이미지 클릭 성공: {title} ({adjusted_x}, {adjusted_y})")
+                                success = True
+                            else:
+                                print(f"클릭 명령 실패: {result.stderr}")
+                        else:
+                            print(f"ADB 연결 실패: {device_address}")
+                            
+                    except Exception as e:
+                        print(f"클릭 처 오류 발생: {str(e)}")
+                else:
+                    print(f"색상이 일치하지 않습니다. 차이값: {color_diff}")
+                    
+            except Exception as e:
+                print(f"처리 중 오류 발생: {str(e)}")
+                continue
+                
+        return success
