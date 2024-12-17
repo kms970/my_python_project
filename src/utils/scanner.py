@@ -88,7 +88,6 @@ class ImageScanner:
 
         # window_title이 지정된 경우 해당 창만 처리
         if window_title:
-            print(f"지정된 창 검색: {window_title}")
             ldplayer_windows = [(hwnd, title) for hwnd, title in ldplayer_windows if title == window_title]
             if not ldplayer_windows:
                 if not suppress_logging:
@@ -134,13 +133,6 @@ class ImageScanner:
             
             if not suppress_logging:
                 print(f"{title} 스크린샷 크기: {screenshot_gray.shape}")
-                
-                # 디버깅을 위한 이미지 저장
-                debug_dir = "debug"
-                if not os.path.exists(debug_dir):
-                    os.makedirs(debug_dir)
-                cv2.imwrite(os.path.join(debug_dir, f'debug_screenshot_{title}.png'), screenshot_gray)
-                cv2.imwrite(os.path.join(debug_dir, f'debug_template_{title}.png'), template_gray)
 
             # 템플릿 매칭
             result = cv2.matchTemplate(screenshot_gray, template_gray, cv2.TM_CCOEFF_NORMED)
@@ -153,15 +145,6 @@ class ImageScanner:
                 center_x = max_loc[0] + template_gray.shape[1] // 2
                 center_y = max_loc[1] + template_gray.shape[0] // 2
                 results.append((title, (center_x, center_y)))
-                if not suppress_logging:
-                    print(f"{title}: 매칭 성공 - 중심점 ({center_x}, {center_y})")
-                    
-                    # 디버깅을 위한 매칭 결과 시각화
-                    debug_img = screenshot_gray.copy()
-                    cv2.rectangle(debug_img, max_loc, 
-                                (max_loc[0] + template_gray.shape[1], max_loc[1] + template_gray.shape[0]), 
-                                255, 2)
-                    cv2.imwrite(os.path.join(debug_dir, f'debug_result_{title}.png'), debug_img)
 
         return results
 

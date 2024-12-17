@@ -24,14 +24,27 @@ class ProcessMonitorGUI:
         self.root.geometry("800x400")
 
         # 변수 초기화
-        self.selected_processes = set()  # 추가된 부분
-        self.is_monitoring = False      # 추가된 부분
-        self.monitor_thread = None      # 추가된 부분
-        self.image_scanner = ImageScanner()  # 추가된 부분
-        self.images_folder = os.path.join(parent_dir, "images")  # 추가된 부분
-
+        self.selected_processes = set()
+        self.is_monitoring = False
+        self.monitor_thread = None
+        self.image_scanner = ImageScanner()
+        
+        # PyInstaller의 임시 폴더 경로 가져오기
+        if getattr(sys, 'frozen', False):
+            self.base_path = sys._MEIPASS
+        else:
+            self.base_path = os.path.dirname(os.path.dirname(__file__))
+        
+        # 이미지 폴더 경로 설정
+        self.images_folder = os.path.join(self.base_path, "images")
+        self.click_images_folder = os.path.join(self.base_path, "click_images")
+        
+        # ADB 경로를 위한 StringVar 초기화
+        self.adb_path = tk.StringVar()
+        
         # 설정 로드
-        self.load_config()
+        config = self.load_config()
+        self.adb_path.set(config.get("adb_path", ""))
         
         # 메인 프레임 생성
         main_frame = ttk.Frame(root)
@@ -145,29 +158,43 @@ class ProcessMonitorGUI:
         self.root.after(3000, self.auto_refresh)
 
     def load_config(self):
-        default_adb_path = r"C:\Program Files (x86)\LDPlayer\LDPlayer9\adb.exe"
-        self.adb_path = tk.StringVar()
-        
         try:
-            if os.path.exists(CONFIG_FILE):
-                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                    config = json.load(f)
-                    self.adb_path.set(config.get('adb_path', default_adb_path))
-            else:
-                self.adb_path.set(default_adb_path)
+            # 실행 파일 디렉토리에서 config.json 찾기
+            base_path = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(__file__)
+            config_path = os.path.join(base_path, 'config.json')
+            
+            # config.json이 없으면 기본 설정으로 생성
+            if not os.path.exists(config_path):
+                default_config = {
+                    "adb_path": "F:/LDPlayer/LDPlayer9/adb.exe"
+                }
+                with open(config_path, 'w', encoding='utf-8') as f:
+                    json.dump(default_config, f, indent=4)
+            
+            # config.json 읽기
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                
+            return config
         except Exception as e:
-            print(f"설정 파일 로드 중 오류 발생: {str(e)}")
-            self.adb_path.set(default_adb_path)
+            print(f"설정 파일 로드 중 오류: {str(e)}")
+            return {"adb_path": ""}
 
     def save_config(self):
         try:
+            base_path = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(__file__)
+            config_path = os.path.join(base_path, 'config.json')
+            
             config = {
-                'adb_path': self.adb_path.get()
+                "adb_path": self.adb_path.get()
             }
-            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                json.dump(config, f, ensure_ascii=False, indent=4)
+            
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=4)
+                
+            print("설정이 저장되었습니다.")
         except Exception as e:
-            print(f"설정 파일 저장 중 오류 발생: {str(e)}")
+            print(f"설정 저장 중 오류: {str(e)}")
 
     def select_adb_path(self):
         from tkinter import filedialog
